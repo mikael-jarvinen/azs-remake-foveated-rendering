@@ -1,0 +1,1 @@
+Eye-tracked foveated rendering built into the game's renderer: full quality where you look, NVIDIA Variable Rate Shading in your periphery. GPU time per frame 3.42 -> 1.86 ms in the menu. Steam Frame tested; PSVR2 (PSVR2Toolkit) and other SteamVR eye trackers supported. NVIDIA RTX / GTX 16xx.

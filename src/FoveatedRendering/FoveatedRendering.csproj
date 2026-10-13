@@ -7,7 +7,7 @@
     <Nullable>disable</Nullable>
     <ImplicitUsings>enable</ImplicitUsings>
     <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
-    <Version>1.1.0</Version>
+    <Version>1.2.0</Version>
     <CopyLocalLockFileAssemblies>false</CopyLocalLockFileAssemblies>
     <ProduceReferenceAssembly>false</ProduceReferenceAssembly>
     <GenerateDocumentationFile>false</GenerateDocumentationFile>

@@ -1,8 +1,19 @@
 # Changelog
 
-## Unreleased
-- Repository build: the managed project references only BepInEx and Unity assemblies (no game assemblies), the native
-  build finds Visual Studio through `vswhere`, release builds embed no local paths.
+## 1.2.0
+- Eye tracking on more headsets ([#1](https://github.com/mikael-jarvinen/azs-remake-foveated-rendering/issues/1)): the
+  eye tracking binding is now merged into every headset binding the game ships (Index, Vive, Vive Pro, Vive Cosmos,
+  Rift, Windows Mixed Reality). Those override SteamVR's generic fallback, so any eye tracker reported through one of
+  those headset types was never delivered before. Every other headset uses the mod's `generic_hmd` binding. Headset
+  types from installed SteamVR drivers (SteamVR's own, external drivers, drivers installed as Steam apps) are bound too.
+  The game's files are backed up as `*.original` before their first change.
+- Gaze diagnostics ([#2](https://github.com/mikael-jarvinen/azs-remake-foveated-rendering/issues/2)): the log names the
+  connected headset and its type, whether it advertises eye gaze and what SteamVR bound the gaze action to, and after
+  25 seconds without gaze explains the most likely cause.
+- PSVR2 with [PSVR2Toolkit](https://github.com/BnuuySolutions/PSVR2Toolkit) is expected to work: its driver publishes
+  gaze through SteamVR's standard eye tracking input.
+- Build: the managed project references only BepInEx and Unity assemblies (no game assemblies), the native build finds
+  Visual Studio through `vswhere`, release builds embed no local paths.
 
 ## 1.1.0
 - Angular foveation: each shading tile knows its view direction from SteamVR's own projection, so the full-quality

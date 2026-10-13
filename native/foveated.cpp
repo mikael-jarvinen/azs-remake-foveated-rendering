@@ -538,6 +538,49 @@ FOV_API void FovSetGazeDir(float x, float y, float z, int valid)
     g_gazeDir[0] = d[0]; g_gazeDir[1] = d[1]; g_gazeDir[2] = d[2]; g_gazeValid = valid;
 }
 
+// Diagnostics for the gaze path. Writes the connected headset's controller type to typeOut and a one-line
+// description (model, eye-gaze support, what the gaze action is bound to) to textOut. Returns the number of
+// input bindings SteamVR reports for the gaze action, or -1 when OpenVR is not available.
+FOV_API int FovGazeDiagnostics(char* typeOut, int typeLen, char* textOut, int textLen)
+{
+    if (typeOut && typeLen > 0) typeOut[0] = 0;
+    if (textOut && textLen > 0) textOut[0] = 0;
+    if (!OpenVrInterfaces()) return -1;
+    char type[128] = "", model[128] = "", manu[128] = "";
+    vr::ETrackedPropertyError pe;
+    g_vrSystem->GetStringTrackedDeviceProperty(vr::k_unTrackedDeviceIndex_Hmd, vr::Prop_ControllerType_String, type, sizeof(type), &pe);
+    g_vrSystem->GetStringTrackedDeviceProperty(vr::k_unTrackedDeviceIndex_Hmd, vr::Prop_ModelNumber_String, model, sizeof(model), &pe);
+    g_vrSystem->GetStringTrackedDeviceProperty(vr::k_unTrackedDeviceIndex_Hmd, vr::Prop_ManufacturerName_String, manu, sizeof(manu), &pe);
+    bool eyeGaze = g_vrSystem->GetBoolTrackedDeviceProperty(vr::k_unTrackedDeviceIndex_Hmd, vr::Prop_SupportsXrEyeGazeInteraction_Bool, &pe);
+    bool eyeGazeKnown = pe == vr::TrackedProp_Success;
+    if (typeOut && typeLen > 0) { strncpy(typeOut, type, typeLen - 1); typeOut[typeLen - 1] = 0; }
+
+    char bound[512] = "none";
+    int count = 0;
+    if (g_vrInput && g_gazeAction != vr::k_ulInvalidActionHandle)
+    {
+        vr::InputBindingInfo_t info[4] = {};
+        uint32_t n = 0;
+        vr::EVRInputError e = g_vrInput->GetActionBindingInfo(g_gazeAction, info, sizeof(vr::InputBindingInfo_t), 4, &n);
+        if (e == vr::VRInputError_None && n > 0)
+        {
+            bound[0] = 0; count = (int)n;
+            for (uint32_t i = 0; i < n; i++)
+            {
+                char one[200];
+                snprintf(one, sizeof(one), "%s%s%s (%s)", i ? ", " : "", info[i].rchDevicePathName, info[i].rchInputPathName, info[i].rchInputSourceType);
+                strncat(bound, one, sizeof(bound) - strlen(bound) - 1);
+            }
+        }
+        else if (e != vr::VRInputError_None) snprintf(bound, sizeof(bound), "unknown (GetActionBindingInfo error %d)", (int)e);
+    }
+    if (textOut && textLen > 0)
+        snprintf(textOut, textLen, "headset '%s %s' type '%s', advertises eye gaze: %s, gaze action bound to: %s",
+                 manu, model, type, eyeGazeKnown ? (eyeGaze ? "yes" : "no") : "not reported", bound);
+    Log("diagnostics: %s", textOut ? textOut : "");
+    return count;
+}
+
 FOV_API int FovProjectHeadDir(float x, float y, float z, float* out)
 {
     float d[3] = { x, y, z }; Normalize(d);
