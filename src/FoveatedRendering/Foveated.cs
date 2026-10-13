@@ -4,6 +4,7 @@
 // Licensed under GPL-3.0 with the additional terms in ADDITIONAL-TERMS.md (attribution, permission to run with the game).
 
 using System;
+using System.Collections.Generic;
 using System.IO;
 using System.Runtime.InteropServices;
 using System.Text.Json;
@@ -34,6 +35,7 @@ internal static class FovNative
     [DllImport(Lib, CallingConvention = CallingConvention.Cdecl)] public static extern void FovRequestDump();
     [DllImport(Lib, CallingConvention = CallingConvention.Cdecl)] public static extern void FovGetStats(out int frames, out int enables, out int disables, out int skipped, out int vrsSupported, out int hookedContexts, out int descMatches);
     [DllImport(Lib, CallingConvention = CallingConvention.Cdecl)] public static extern int FovGazeUpdate([Out] float[] dir, out int status, out int mode);
+    [DllImport(Lib, CallingConvention = CallingConvention.Cdecl)] public static extern int FovGazeDiagnostics(byte[] typeOut, int typeLen, byte[] textOut, int textLen);
     [DllImport(Lib, CallingConvention = CallingConvention.Cdecl)] public static extern int FovGetGpuTiming(int frames, out float preSubmitMs, out float totalRenderMs);
 
     public static string PluginDir;
@@ -141,72 +143,25 @@ internal static class Foveated
             FlipRows.Value ? 1 : 0, NoGaze.Value == NoGazeKind.Center ? 1 : 0, DebugDumpInterval.Value > 0 ? 1 : 0);
     }
 
-    /// <summary>Adds an eye-tracking action and a Steam Frame HMD binding to the game's SteamVR action manifest.</summary>
+    /// <summary>Adds the eye tracking action and bindings for every headset type SteamVR knows (see HeadsetBindings).</summary>
     private static void PatchActionManifest()
     {
         try
         {
+            var log = new List<string>();
+            var types = new SortedSet<string>(HeadsetBindings.KnownHeadsetTypes, StringComparer.OrdinalIgnoreCase);
+            foreach (var t in HeadsetBindings.DiscoverHeadsetTypes(log)) types.Add(t);
             string dir = Path.Combine(Application.streamingAssetsPath, "SteamVR");
-            string manifestPath = Path.Combine(dir, "actions.json");
-            if (!File.Exists(manifestPath)) { Plugin.Logger.LogWarning("Foveated: SteamVR actions.json not found, gaze unavailable."); return; }
-            var root = JsonNode.Parse(File.ReadAllText(manifestPath))!.AsObject();
-            string action = ActionPath.Value;
-            string setName = action.Substring(0, action.IndexOf("/in/"));
-            bool changed = false;
-
-            var actions = root["actions"]!.AsArray();
-            bool hasAction = false;
-            foreach (var a in actions) if ((string)a!["name"]! == action) hasAction = true;
-            if (!hasAction)
-            {
-                actions.Add(new JsonObject { ["name"] = action, ["type"] = "eyetracking", ["requirement"] = "optional" });
-                changed = true;
-            }
-            var bindings = root["default_bindings"]!.AsArray();
-            foreach (var type in new[] { "frame_hmd", "generic_hmd" })
-            {
-                bool has = false;
-                foreach (var b in bindings) if ((string)b!["controller_type"]! == type) has = true;
-                if (!has) { bindings.Add(new JsonObject { ["controller_type"] = type, ["binding_url"] = $"binding_{type}.json" }); changed = true; }
-            }
-            if (changed)
-            {
-                string backup = manifestPath + ".original";
-                if (!File.Exists(backup)) File.Copy(manifestPath, backup);
-                File.WriteAllText(manifestPath, root.ToJsonString(new JsonSerializerOptions { WriteIndented = true }));
-                Plugin.Logger.LogInfo($"Foveated: updated actions.json (eye tracking action {action} and HMD bindings)");
-            }
-            foreach (var type in new[] { "frame_hmd", "generic_hmd" })
-            {
-                string bindingPath = Path.Combine(dir, $"binding_{type}.json");
-                if (File.Exists(bindingPath)) continue;
-                var binding = new JsonObject
-                {
-                    ["action_manifest_version"] = 0,
-                    ["alias_info"] = new JsonObject(),
-                    ["category"] = "steamvr_input",
-                    ["controller_type"] = type,
-                    ["description"] = "Eye gaze for foveated rendering (Foveated Rendering mod)",
-                    ["name"] = "Eye gaze",
-                    ["options"] = new JsonObject(),
-                    ["simulated_actions"] = new JsonArray(),
-                    ["bindings"] = new JsonObject
-                    {
-                        [setName] = new JsonObject
-                        {
-                            ["eyetracking"] = new JsonArray(new JsonObject { ["output"] = action, ["path"] = "/user/head/eyetracking" })
-                        }
-                    }
-                };
-                File.WriteAllText(bindingPath, binding.ToJsonString(new JsonSerializerOptions { WriteIndented = true }));
-                Plugin.Logger.LogInfo($"Foveated: wrote binding_{type}.json");
-            }
+            HeadsetBindings.Apply(dir, ActionPath.Value, types, log);
+            foreach (var line in log) if (Verbose.Value || !line.StartsWith("headset type")) Plugin.Logger.LogInfo($"Foveated: {line}");
+            Plugin.Logger.LogInfo($"Foveated: eye tracking bound for headset types: {string.Join(", ", types)} (any other headset uses the generic_hmd binding)");
         }
         catch (Exception e)
         {
             Plugin.Logger.LogError($"Foveated: action manifest patch failed: {e}");
         }
     }
+
 }
 
 /// <summary>Per-frame driver. Runs in LateUpdate, i.e. after game logic and before this frame's cameras render.</summary>
@@ -227,6 +182,7 @@ internal class FoveatedBehaviour : MonoBehaviour
     private Vector3 lastGood = new Vector3(0, 0, -1);
     private float lastGoodTime = -100f;
     private bool reportedValid;
+    private float diagAt = -1f, hintAt = -1f;
     private float simT;
     private double benchOnSum, benchOffSum; private int benchOnN, benchOffN;
     private float phaseSkipUntil;
@@ -347,6 +303,13 @@ internal class FoveatedBehaviour : MonoBehaviour
                     nextGazeInit = now + 5f;   // retry until SteamVR input is up
                     gazeInit = FovNative.FovGazeInit(Foveated.ActionPath.Value) != 0;
                     Plugin.Logger.LogInfo($"Foveated: SteamVR eye tracking action init -> {(gazeInit ? "ok" : "not yet")}");
+                    if (gazeInit) { diagAt = now + 8f; hintAt = now + 25f; }
+                }
+                if (diagAt > 0 && now >= diagAt) { diagAt = -1f; RunDiagnostics(); }
+                if (hintAt > 0 && now >= hintAt)
+                {
+                    hintAt = -1f;
+                    if (!reportedValid) GazeHint();
                 }
                 if (!gazeInit) { gazeValid = false; return; }
                 int ok = FovNative.FovGazeUpdate(dir, out int status, out int mode);
@@ -366,6 +329,29 @@ internal class FoveatedBehaviour : MonoBehaviour
                 return;
             }
         }
+    }
+
+    private string lastHeadsetType = "", lastDiag = "";
+
+    private void RunDiagnostics()
+    {
+        var type = new byte[128]; var text = new byte[600];
+        int n = FovNative.FovGazeDiagnostics(type, type.Length, text, text.Length);
+        lastHeadsetType = System.Text.Encoding.UTF8.GetString(type).TrimEnd('\0');
+        lastDiag = System.Text.Encoding.UTF8.GetString(text).TrimEnd('\0');
+        Plugin.Logger.LogInfo($"Foveated: {lastDiag}");
+        if (lastHeadsetType.Length > 0 && !HeadsetBindings.BoundTypes.Contains(lastHeadsetType))
+            Plugin.Logger.LogInfo($"Foveated: no dedicated binding for headset type '{lastHeadsetType}'; SteamVR uses the mod's generic_hmd binding for it.");
+    }
+
+    private void GazeHint()
+    {
+        string why = lastDiag.Contains("bound to: none")
+            ? "SteamVR did not bind the gaze action to an eye tracker on this headset, so its SteamVR driver most likely does not provide eye tracking to apps. Steam Frame: enable SteamVR > Settings > Steam Link > share eye tracking data. PSVR2: install PSVR2Toolkit. Other headsets may need a bridge tool. If you changed this game's controller bindings in SteamVR, reset them to the default."
+            : lastDiag.Contains("advertises eye gaze: no")
+                ? "The headset's SteamVR driver does not offer eye tracking to apps. Steam Frame: enable SteamVR > Settings > Steam Link > share eye tracking data. PSVR2: install PSVR2Toolkit. Other headsets may need a bridge tool."
+                : "The gaze action is bound but SteamVR delivers no valid eye data. Check that eye tracking is enabled and calibrated in the headset's software (Steam Frame: the Steam Link sharing setting).";
+        Plugin.Logger.LogWarning($"Foveated: no eye tracking data after 25 s, rendering at {(Foveated.NoGaze.Value == Foveated.NoGazeKind.FullQuality ? "full quality" : "fixed foveation")}. {why}");
     }
 
     // ---- outline ------------------------------------------------------------------------------------------------

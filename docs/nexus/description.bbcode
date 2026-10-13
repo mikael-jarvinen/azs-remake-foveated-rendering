@@ -1,0 +1,71 @@
+[size=5][b]Foveated Rendering - eye-tracked, built into the game[/b][/size]
+
+Dynamic foveated rendering for Arizona Sunshine Remake. The area you look at stays at full quality while your GPU shades your peripheral vision at a quarter or a sixteenth of the pixels.
+
+This is not an injector or an overlay. The mod runs inside the game's own renderer and only touches the 3D scene, so post-processing, UI and text stay clean and there's no extra frame of latency.
+
+[b]Measured in the main menu: the game's GPU time per frame went from 3.42 ms to 1.86 ms.[/b] Gains in gameplay depend on the scene and your render resolution.
+
+[size=4][b]Requirements[/b][/size]
+[list]
+[*][b]NVIDIA RTX 20xx or newer, or GTX 16xx[/b] (Variable Rate Shading on DirectX 11). On AMD or Intel the mod stays off and the game runs as normal.
+[*][b]An eye-tracked headset whose SteamVR driver provides eye tracking to apps[/b] (see Supported headsets).
+[*][b]BepInEx 6 (IL2CPP, build be.788)[/b]: download the BepInEx optional file on this page.
+[/list]
+Without eye tracking data the game renders at full quality everywhere, so the mod is safe to keep installed.
+
+[size=4][b]Supported headsets[/b][/size]
+The mod reads gaze through SteamVR's standard eye tracking input and sets up the bindings for every headset type by itself, so any headset whose SteamVR driver publishes eye tracking should work without configuration.
+[list]
+[*][b]Steam Frame[/b] (tested): SteamVR > Settings > Steam Link > enable [i]Share eye tracking data to other apps on this PC[/i].
+[*][b]PlayStation VR2[/b] (expected to work, untested): install [url=https://github.com/BnuuySolutions/PSVR2Toolkit]PSVR2Toolkit[/url] and calibrate eye tracking in it. Its driver publishes gaze to SteamVR. PSVR2Toolkit's terms say its eye tracking data must not be used commercially; this mod is free.
+[*][b]Pimax with eye tracking[/b] (expected to work, untested): needs a driver shim that feeds Pimax eye tracking into SteamVR, such as mbucchia's Pimax-EyeTracker-SteamVR.
+[*][b]Quest Pro and others over Steam Link[/b]: unknown, depends on whether Steam Link shares their eye tracking.
+[*][b]Vive Pro Eye, Varjo, Virtual Desktop setups[/b]: not supported without a bridge; their eye tracking doesn't go through SteamVR's input.
+[/list]
+About 8 seconds into VR, [i]BepInEx\LogOutput.log[/i] names your headset and what SteamVR bound the gaze to, and after 25 seconds without gaze it explains the most likely cause.
+
+[size=4][b]Installation[/b][/size]
+[list=1]
+[*]Extract the BepInEx optional file into the game folder (the folder with ArizonaSunshine1hd.exe).
+[*]Extract this mod into the same folder. You should get [i]BepInEx\plugins\AZS1HD.FoveatedRendering\[/i] with two DLLs.
+[*]Start the game. The [b]first[/b] launch with BepInEx takes 1-3 minutes on a black screen; later launches are normal.
+[*]In VR, [i]BepInEx\LogOutput.log[/i] should show "receiving eye tracking data".
+[/list]
+
+[size=4][b]See it working[/b][/size]
+Set [i]ShowOutline = true[/i] in the config. A red dot marks where the mod thinks you're looking, the green ring is the edge of the full-quality area and the yellow ring the edge of the half-quality area. The dot should stay on whatever you look at, also while you move your head.
+
+[size=4][b]Settings[/b][/size]
+[i]BepInEx\config\azs1hd.foveatedrendering.cfg[/i] is created on the first launch.
+[code]
+InnerDegrees = 20        # full quality within this angle of where you look
+MidDegrees = 32          # 2x2 shading up to this angle, 4x4 beyond
+OuterRate = 2            # 2 = 4x4 periphery, 1 = 2x2 (gentler)
+WithoutGaze = FullQuality
+ShowOutline = false
+BenchmarkSeconds = 0     # >0: toggles foveation every N seconds and logs GPU ms per frame for each state
+[/code]
+More performance: lower [i]InnerDegrees[/i] / [i]MidDegrees[/i]. Sharper periphery: raise them, or set [i]OuterRate = 1[/i].
+
+[size=4][b]How it works[/b][/size]
+[list]
+[*]A native module watches the game's Direct3D 11 render passes. When the game draws its 3D scene it turns on NVIDIA Variable Rate Shading with a per-eye shading-rate map; for everything else it's off.
+[*]The shading-rate map is built from SteamVR's own projection, the one the game renders with, so the full-quality area is a true circle around your gaze, also on asymmetric lenses.
+[*]Gaze is SteamVR's eye tracking for the exact frame being rendered, paired with that frame's head pose, so the sharp area doesn't lag behind head movement.
+[/list]
+
+[size=4][b]Troubleshooting[/b][/size]
+[list]
+[*][i]gaze status 0[/i] in the log: SteamVR isn't sharing eye tracking. Check the Steam Link setting above.
+[*][i]VRS supported: 0[/i] in [i]BepInEx\Foveated.log[/i]: your GPU or driver has no Variable Rate Shading.
+[*]The sharp area doesn't follow your eyes: turn on [i]ShowOutline[/i] and [i]VerboseLogging[/i], play a minute and attach [i]BepInEx\LogOutput.log[/i] and [i]BepInEx\Foveated.log[/i] to a bug report, saying where the red dot was compared to where you looked.
+[/list]
+
+[size=4][b]Uninstall[/b][/size]
+Delete [i]BepInEx\plugins\AZS1HD.FoveatedRendering[/i]. The eye tracking entries the mod added to the game's SteamVR input files are harmless on their own; to remove them, restore the [i].original[/i] files in [i]ArizonaSunshine1hd_Data\StreamingAssets\SteamVR[/i] or verify the game files in Steam.
+
+[size=4][b]Credits[/b][/size]
+Approach informed by fholger's vrperfkit / openvr_foveated, mbucchia's PimaxMagic4All and FarhanTheTinkerer's FrameEyePointer. Uses the NVIDIA NVAPI SDK (MIT) and the OpenVR SDK (BSD-3-Clause). Source code: [url=https://github.com/mikael-jarvinen/azs-remake-foveated-rendering]github.com/mikael-jarvinen/azs-remake-foveated-rendering[/url] (GPL-3.0).
+
+Unofficial fan mod, not affiliated with or endorsed by Vertigo Games, Valve or NVIDIA.

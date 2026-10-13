@@ -18,7 +18,7 @@ public class Plugin : BasePlugin
 {
     public const string Guid = "azs1hd.foveatedrendering";
     public const string Name = "Foveated Rendering";
-    public const string Version = "1.1.0";
+    public const string Version = "1.2.0";
 
     internal static ManualLogSource Logger;
 
